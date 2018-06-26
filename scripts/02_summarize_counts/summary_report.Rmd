@@ -22,7 +22,7 @@ library(fastqcr)
 library(reshape2)
 
 source("~/workspace/mddrna/scripts/functions/heatmapFunctions.R")
-load("~/workspace/prostate_reprocessing/processed_data/01_expression/fpkm/prostate_rnaseq_dds_fpkm.Rdata")
+load("~/workspace/prost_RNAseq_reprocessing/output/prostate_rnaseq_dds_fpkm.Rdata")
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -43,7 +43,7 @@ makeTsne <- function(x, id, p) {
 
 ```{r summarizeSamples, include = FALSE}
 # directory containing the fastqc reports
-dir <- "/Users/derrickd/data/korkola/prostate/fastqc/fq/"
+dir <- "/Users/derrickd/workspace/prost_RNAseq_reprocessing/output/fastqc/"
 fastqc <- qc_aggregate(dir)
 
 # getting colData from deseq data set
