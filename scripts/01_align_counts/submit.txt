@@ -1,0 +1,5 @@
+for f in /home/exacloud/lustre1/HeiserLab/derrickd/RNASeq/korkola/raw/*R1.fastq.gz
+do nm=`basename ${f%_R1_00*.fastq.gz}`
+  echo $nm
+  sbatch run_kallisto.sbatch $nm
+done

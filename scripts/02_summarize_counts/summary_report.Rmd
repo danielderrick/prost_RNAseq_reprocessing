@@ -1,0 +1,195 @@
+---
+title: "Prostate Cell Line Panel RNAseq Reprocessing"
+author: "Daniel Derrick"
+date: "6/14/2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+library(ggrepel)
+library(org.Hs.eg.db)
+library(Rtsne)
+library(circlize)
+library(RColorBrewer)
+library(tidyverse)
+library(cowplot)
+library(DESeq2)
+library(knitr)
+library(ComplexHeatmap)
+library(fastqcr)
+library(reshape2)
+
+source("~/workspace/mddrna/scripts/functions/heatmapFunctions.R")
+load("~/workspace/prostate_reprocessing/processed_data/01_expression/fpkm/prostate_rnaseq_dds_fpkm.Rdata")
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r makeTsneFunction, include = FALSE}
+makeTsne <- function(x, id, p) {
+  set.seed(5)
+  temp <- Rtsne(t(x), check_duplicates = FALSE, initial_dims = id,
+                perplexity = p, max_iter = 5000, theta = 0.0)
+  temp.toPlot <- data.frame(temp$Y)
+  temp.toPlot$cell_line <- colnames(x)
+  colnames(temp.toPlot)[1:2] <- c("t-SNE 1", "t-SNE 2")
+  q <- ggplot(temp.toPlot, aes(x = `t-SNE 1`, y = `t-SNE 2`))
+  q <- q + geom_point()
+  q <- q + geom_label_repel(aes(label = cell_line))
+  return(q)
+}
+```
+
+```{r summarizeSamples, include = FALSE}
+# directory containing the fastqc reports
+dir <- "/Users/derrickd/data/korkola/prostate/fastqc/fq/"
+fastqc <- qc_aggregate(dir)
+
+# getting colData from deseq data set
+qc.stats.df <- qc_stats(fastqc)
+
+qc.stats.df <- qc.stats.df %>% filter(!duplicated(tot.seq))
+qc.stats.df$sample <- str_remove(qc.stats.df$sample, "_R1")
+
+coldata.toPlot <- 
+  data.frame( colData(dds.fpkm) , stringsAsFactors = FALSE) %>%
+  mutate(aligned.reads = apply(counts(dds.fpkm), 2, sum)) %>% 
+  mutate(samples = as.character(colData(dds.fpkm)$samples)) %>% 
+  mutate(samples = str_remove(samples, "_001")) %>% 
+  filter(cell_line != "CAL-51") %>% 
+  dplyr::select(-replicate) %>% 
+  dplyr::rename(sample = samples)
+
+coldata.toPlot <-
+  coldata.toPlot %>% 
+  mutate(color = case_when(
+    (aligned.reads > 20000000)                    ~ "high (> 20M reads)",
+    (aligned.reads > 10000000 & aligned.reads < 20000000) ~ "medium (10-20M reads)",
+    (aligned.reads < 10000000)                    ~ "low (< 10M reads)"
+  ))
+
+coldata.toPlot <- inner_join(coldata.toPlot, qc.stats.df, by = "sample")
+coldata.toPlot <-
+  coldata.toPlot %>% 
+  dplyr::rename(total.reads = tot.seq) %>% 
+  mutate(total.reads = as.numeric(total.reads))
+```
+
+## FastQC Reports
+
+```{r fastqc_prep, include = FALSE}
+which_modules <- fastqc$module[c(2, 3, 4, 5, 6, 7, 9, 10, 11, 12)]
+fastqc_summary <-
+  summary(fastqc) %>% 
+  dplyr::select(-nb_samples, -failed, -warned) %>% 
+  filter(module %in% which_modules) %>% 
+  dplyr::rename(fail = nb_fail,
+         pass = nb_pass,
+         warning = nb_warn)
+```
+
+FastQC was used to assess quality of paired-end RNAseq from 20 prostate cell lines. Since the data is paired-end, two reports were generated per sample. The results are summarized in the table below:
+
+```{r fastqc_show, echo = FALSE}
+kable(fastqc_summary[c(6, 7, 8, 1, 4, 3, 9, 10, 5, 2), c(1,3,4,2)])
+```
+
+Some samples produced warnings for overrepresented sequences, sequence duplication levels,
+Kmer content, and per base sequence content; this is normal for RNAseq libraries.
+
+Many samples failed or produced warnings for "Per tile sequence quality", which indicates that certain
+physical regions (tiles) of the flowcell had abnormally low quality scores, relative to other tiles'
+quality scores at similar cycles. Inspecting FastQC plots of quality score x tile for the failed samples
+showed that low-quality tiles were generally rare, isolated, and did not persist for many cycles, 
+so this does not appear to be a problem that needs correction.
+
+\newpage
+
+```{r show_lib_sizes, echo = FALSE, fig.height = 5}
+ggplot() + 
+  geom_col(data = coldata.toPlot, aes(x = cell_line, y = total.reads, fill = color)) +
+  scale_fill_manual(values = c("low (< 10M reads)" = "firebrick4", 
+                      "medium (10-20M reads)" = "darkgoldenrod3",
+                      "high (> 20M reads)" = "dodgerblue4"),
+                    name = "Category") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Sequenced Reads per Cell Line") +
+  xlab("cell line") + ylab("sequenced reads")
+```
+
+There was relatively high variation in the number of sequenced reads per cell line. 
+22RV1, CVRR1, and LNCaP-FGC all had over 40M reads. The the remaining cell lines had between 10 and 20
+million reads per samples, with the exception of VCAP. It is unusual that a few of these samples were
+much more deeply sequenced than the others.
+
+\newpage
+
+## Alignment Summary
+
+Samples were aligned to the Gencode V24 transcriptome using the Kallisto pseudoalignment
+software. The median alignment rate was 80.9%; the rate ranged from 71.5% (DuCaP) to 
+87.1% (LnCaP-FGC).
+
+```{r aligned.reads_summary, echo = FALSE}
+coldata.melt <- 
+  coldata.toPlot %>% 
+  dplyr::select(cell_line, aligned.reads, total.reads) %>% 
+  melt(., id.vars = "cell_line")
+
+kable(
+coldata.toPlot %>% mutate(pct_aligned = aligned.reads/total.reads)  %>% dplyr::select(cell_line, pct_aligned) %>% arrange(desc(pct_aligned)) %>% dplyr::rename(`Cell Line` = cell_line, `Percent Aligned` = pct_aligned)
+)
+
+ggplot() + 
+  geom_col(data = coldata.melt, aes(x = cell_line, y = value, fill = variable),
+           position = "dodge") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Sequenced Reads per Cell Line") +
+  xlab("cell line") + ylab("# reads") +
+  scale_fill_manual(values = c("steelblue4", "steelblue1"), name = "")
+```
+
+## Unsupervised clustering of cell lines
+
+## t-SNE clustering
+```{r plotTsne, echo = FALSE}
+makeTsne(log2.fpkm.prostate, 50, 3)
+```
+
+\newpage
+
+## Heatmap - all genes
+
+```{r heatmap_all, echo = FALSE, fig.height=8.5}
+Heatmap(t(scale(t(log2.fpkm.prostate), scale = FALSE)), 
+        show_row_names = FALSE,
+        col = makePalette(t(scale(t(log2.fpkm.prostate), scale = FALSE))),
+        name = "mean-centered\nlog2(fpkm + 1)")
+```
+
+\newpage
+
+## Heatmap - 100 most variant genes
+```{r make.heatmap.100, include=FALSE}
+filtro <- (apply(log2.fpkm.prostate, 1, function(x) var(x)^(1/2)))
+top100 <- 
+  filtro %>% 
+  sort(., decreasing = TRUE) %>% 
+  head(., n = 103) %>% 
+  names(.)
+lfp.top100 <- log2.fpkm.prostate[top100, ]
+symbols <- mapIds(org.Hs.eg.db, rownames(lfp.top100), "SYMBOL", "ENSEMBL")
+filtro <- is.na(symbols)
+symbols <- symbols[!filtro]
+lfp.top100 <- lfp.top100[!filtro, ]
+rownames(lfp.top100) <- symbols
+```
+
+```{r heatmap.100, echo=FALSE, fig.height=8.5}
+Heatmap(t(scale(t(lfp.top100), scale = FALSE)), 
+        col = makePalette(t(scale(t(log2.fpkm.prostate[top100, ]), scale = FALSE))),
+        name = "mean-centered\nlog2(fpkm + 1)",
+        row_names_gp = gpar(fontsize = 6))
+```
+
