@@ -71,6 +71,13 @@ save(meta, dds.fpkm, fpkm.prostate, log2.fpkm.prostate,
      file = sprintf("%s%s", dir, "prostate_rnaseq_dds_fpkm.Rdata"))
 
 # writing to TSV files
+
+raw.prostate.toWrite <-
+  data.frame(counts(dds.fpkm)) %>% 
+  mutate(ensembl_id = rownames(counts(dds.fpkm))) %>% 
+  mutate(gene_symbol = mapIds(org.Hs.eg.db, ensembl_id, "SYMBOL", "ENSEMBL")) %>% 
+  dplyr::select(ensembl_id, gene_symbol, everything())
+
 fpkm.prostate.toWrite <-
   data.frame(fpkm.prostate) %>% 
   mutate(ensembl_id = rownames(fpkm.prostate)) %>% 
@@ -92,6 +99,12 @@ write.table(fpkm.prostate.toWrite,
 
 write.table(log2.fpkm.prostate.toWrite, 
             file = sprintf("%s%s%s", dir, "counts/", "prost_log2fpkm.tsv"),
+            quote = FALSE,
+            row.names = FALSE, 
+            sep = "\t")
+
+write.table(raw.prostate.toWrite, 
+            file = sprintf("%s%s%s", dir, "counts/", "prost_raw_counts.tsv"),
             quote = FALSE,
             row.names = FALSE, 
             sep = "\t")
