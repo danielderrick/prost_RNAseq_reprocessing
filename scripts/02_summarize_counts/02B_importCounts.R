@@ -5,19 +5,19 @@
 
 ###############################################################################
 # Setup
+library(org.Hs.eg.db)
 library(tidyverse)
 library(tximport)
 library(DESeq2)
 library(rhdf5)
 
 # Each sample should have its own directory in dir/ containing an abundance.h5
-dir <- "~/data/korkola/prostate/results/"
-load("processed_data/00_prep/kal_annoTable.Rdata")
+dir.data <- "data/kal_out/"
+load("output/kal_annoTable.Rdata")
 ###############################################################################
 
 # Creating metadata from file names
-samples <- list.files(dir)
-
+samples <- list.files(dir.data)
 metadata <- list()
 metadata[[1]] <- str_split_fixed(samples[1:16], "_", 6)
 metadata[[1]] <- metadata[[1]][, -2]
@@ -39,9 +39,10 @@ annoTable <-
   dplyr::rename(TXNAME = target_id, GENEID = ens_gene) %>%
   dplyr::select(TXNAME, GENEID)
 
-# excluding the one breast sample that was with these files
-files <- file.path(dir, meta$samples, "abundance.h5")
+files <- file.path(dir.data, meta$samples, "abundance.h5")
 names(files) <- meta$samples
+
+# excluding the one breast sample that was with these files
 files <- files[-grep("CAL", names(files))]
 meta <- meta[-grep("CAL", meta$samples), ]
 
@@ -51,7 +52,8 @@ txi <- tximport(files, type = "kallisto", tx2gene = annoTable)
 # Making DESeqDataSet for purpose of extracting counts
 dds.fpkm <- DESeqDataSetFromTximport(txi, meta, ~ cell_line)
 
-dds.fpkm.collapsed <- collapseReplicates(dds.fpkm, groupby = meta$cell_line)
+dds.fpkm.collapsed <- collapseReplicates(dds.fpkm, 
+                                         groupby = meta$cell_line)
 dds.fpkm <- DESeq(dds.fpkm.collapsed)
 
 # Getting FPKM counts and log2 FPKM counts
@@ -59,16 +61,13 @@ fpkm.prostate      <- fpkm(dds.fpkm)
 log2.fpkm.prostate <- apply(fpkm.prostate, c(1,2), function(x) {x <- log2(x + 1)})
 
 # Saving
-dir <- "output/"
-if (!dir.exists(dir)) {
-  dir.create(dir, recursive = TRUE)
-}
-if (!dir.exists(sprintf("%s%s", dir, "counts/", recursive = TRUE))) {
-  dir.create(sprintf("%s%s", dir, "counts/", recursive = TRUE))
+dir.out <- "output/counts/"
+if (!dir.exists(dir.out)) {
+  dir.create(dir.out, recursive = TRUE)
 }
 
 save(meta, dds.fpkm, fpkm.prostate, log2.fpkm.prostate, 
-     file = sprintf("%s%s", dir, "prostate_rnaseq_dds_fpkm.Rdata"))
+     file = sprintf("%s%s", dir.out, "prostate_rnaseq_dds_fpkm.Rdata"))
 
 # writing to TSV files
 
@@ -90,6 +89,11 @@ log2.fpkm.prostate.toWrite <-
   mutate(gene_symbol = mapIds(org.Hs.eg.db, ensembl_id, "SYMBOL", "ENSEMBL")) %>% 
   dplyr::select(ensembl_id, gene_symbol, everything())
 
+write.table(raw.prostate.toWrite, 
+            file = sprintf("%s%s%s", dir, "counts/", "prost_raw_counts.tsv"),
+            quote = FALSE,
+            row.names = FALSE, 
+            sep = "\t")
 
 write.table(fpkm.prostate.toWrite, 
             file = sprintf("%s%s%s", dir, "counts/", "prost_fpkm.tsv"),
@@ -99,12 +103,6 @@ write.table(fpkm.prostate.toWrite,
 
 write.table(log2.fpkm.prostate.toWrite, 
             file = sprintf("%s%s%s", dir, "counts/", "prost_log2fpkm.tsv"),
-            quote = FALSE,
-            row.names = FALSE, 
-            sep = "\t")
-
-write.table(raw.prostate.toWrite, 
-            file = sprintf("%s%s%s", dir, "counts/", "prost_raw_counts.tsv"),
             quote = FALSE,
             row.names = FALSE, 
             sep = "\t")
