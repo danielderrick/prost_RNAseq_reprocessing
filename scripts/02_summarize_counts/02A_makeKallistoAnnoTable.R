@@ -17,8 +17,9 @@ library(tidyverse)
 library(sleuth)
 
 # Files containing abundance HDF5 files
-sample_id <- dir(file.path("~/data/korkola/prostate/", "results"))
-kal_dirs <- file.path("~/data/korkola/prostate/", "results", sample_id)
+hdf5.dir <- "data/kal_out/"
+sample_id <- dir(file.path(hdf5.dir))
+kal_dirs <- file.path(hdf5.dir, sample_id)
 tFixName <- function(x) {
   # One batch has "5nM" in sample names, one does not.
   # This function removes those labels to make names consistent.
@@ -34,7 +35,6 @@ tFixName <- function(x) {
 }         # To fix inconsistencies in file names
 
 #####################################################################
-
 # Creating metadata file
 metadata <- list()
 metadata[[1]] <- str_split_fixed(sample_id[1:16], "_", 6)
@@ -76,20 +76,22 @@ gencode_to_hugo$txid <- str_extract(gencode_to_hugo$txid, "[:alnum:]+")
 mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL",
                          dataset = "hsapiens_gene_ensembl",
                          host = 'www.ensembl.org')
-t2g <- biomaRt::getBM(attributes = c("ensembl_transcript_id", "ensembl_gene_id",
-                                     "external_gene_name"), mart = mart)
-t2g <- dplyr::rename(t2g, target_id = ensembl_transcript_id,
-                     ens_gene = ensembl_gene_id, ext_gene = external_gene_name)
 
-colnames(t2g)[1] <- "txid"
-t2g2 <- dplyr::inner_join(gencode_to_hugo, t2g, by = "txid")
-annoTable <- t2g2
+t2g <- biomaRt::getBM(attributes = c("ensembl_transcript_id", 
+                                     "ensembl_gene_id",
+                                     "external_gene_name"), 
+                      mart = mart) %>% 
+       dplyr::rename(txid     = ensembl_transcript_id,
+                     ens_gene = ensembl_gene_id, 
+                     ext_gene = external_gene_name)
+
+annoTable <- dplyr::inner_join(gencode_to_hugo, t2g, by = "txid")
 colnames(annoTable)[1] <- "target_id"
 
-dir <- "processed_data/00_prep/"
+dir <- "output/"
 if (!dir.exists(dir)) {
   dir.create(dir, recursive = TRUE)
 }
 
 save(annoTable,
-     file = "processed_data/00_prep/kal_annoTable.Rdata")
+     file = sprintf("%s%s", dir, "kal_annoTable.Rdata"))
